@@ -24,6 +24,29 @@
 
 #include "windows_common.h"
 
+#include "setupapi.h"
+#include "winnt.h"
+
+#ifndef PCTSTR
+#ifdef UNICODE
+typedef LPCWSTR PCTSTR;
+#else
+typedef LPCSTR PCTSTR;
+#endif
+#endif
+
+#ifndef PTSTR
+#ifdef UNICODE
+typedef LPWSTR PTSTR;
+#else
+typedef LPSTR PTSTR;
+#endif
+#endif
+
+#if !defined(HWND_MESSAGE)
+#define HWND_MESSAGE ((HWND)(-3))
+#endif
+
 #if defined(_MSC_VER)
 // disable /W4 MSVC warnings that are benign
 #pragma warning(disable:4127) // conditional expression is constant
@@ -55,6 +78,7 @@ extern char *_strdup(const char *strSource);
 #endif
 
 #define MAX_CTRL_BUFFER_LENGTH      4096
+#define MAX_USB_HOST_CONTROLLERS    32
 #define MAX_USB_DEVICES             256
 #define MAX_USB_STRING_LENGTH       128
 #define MAX_HID_REPORT_SIZE         1024
@@ -210,10 +234,11 @@ struct hid_device_priv {
 
 typedef struct libusb_device_descriptor USB_DEVICE_DESCRIPTOR, *PUSB_DEVICE_DESCRIPTOR;
 struct windows_device_priv {
+	DWORD devinst;                      // device instance
+	char *device_id;                    // device instance id string
 	uint8_t depth;						// distance to HCD
 	uint8_t port;						// port number on the hub
 	uint8_t active_config;
-	struct libusb_device *parent_dev;	// access to parent is required for usermode ops
 	struct windows_usb_api_backend const *apib;
 	char *path;							// device interface path
 	int sub_api;						// for WinUSB-like APIs
@@ -232,47 +257,12 @@ struct windows_device_priv {
 };
 
 static inline struct windows_device_priv *_device_priv(struct libusb_device *dev) {
+	if (dev == NULL) return NULL;
 	return (struct windows_device_priv *)dev->os_priv;
 }
 
-static inline void windows_device_priv_init(libusb_device* dev) {
-	struct windows_device_priv* p = _device_priv(dev);
-	int i;
-	p->depth = 0;
-	p->port = 0;
-	p->parent_dev = NULL;
-	p->path = NULL;
-	p->apib = &usb_api_backend[USB_API_UNSUPPORTED];
-	p->sub_api = SUB_API_NOTSET;
-	p->hid = NULL;
-	p->active_config = 0;
-	p->config_descriptor = NULL;
-	memset(&(p->dev_descriptor), 0, sizeof(USB_DEVICE_DESCRIPTOR));
-	for (i=0; i<USB_MAXINTERFACES; i++) {
-		p->usb_interface[i].path = NULL;
-		p->usb_interface[i].apib = &usb_api_backend[USB_API_UNSUPPORTED];
-		p->usb_interface[i].sub_api = SUB_API_NOTSET;
-		p->usb_interface[i].nb_endpoints = 0;
-		p->usb_interface[i].endpoint = NULL;
-		p->usb_interface[i].restricted_functionality = false;
-	}
-}
-
-static inline void windows_device_priv_release(libusb_device* dev) {
-	struct windows_device_priv* p = _device_priv(dev);
-	int i;
-	safe_free(p->path);
-	if ((dev->num_configurations > 0) && (p->config_descriptor != NULL)) {
-		for (i=0; i < dev->num_configurations; i++)
-			safe_free(p->config_descriptor[i]);
-	}
-	safe_free(p->config_descriptor);
-	safe_free(p->hid);
-	for (i=0; i<USB_MAXINTERFACES; i++) {
-		safe_free(p->usb_interface[i].path);
-		safe_free(p->usb_interface[i].endpoint);
-	}
-}
+static inline void windows_device_priv_init(libusb_device* dev);
+static inline void windows_device_priv_release(libusb_device* dev);
 
 struct interface_handle_t {
 	HANDLE dev_handle; // WinUSB needs an extra handle for the file
@@ -315,6 +305,7 @@ DLL_DECLARE_PREFIXED(WINAPI, BOOL, p, IsWow64Process, (HANDLE, PBOOL));
 
 /* SetupAPI dependencies */
 DLL_DECLARE_PREFIXED(WINAPI, HDEVINFO, p, SetupDiGetClassDevsA, (const GUID*, PCSTR, HWND, DWORD));
+DLL_DECLARE_PREFIXED(WINAPI, HDEVINFO, p, SetupDiGetClassDevsExA, (const GUID*, PCSTR, HWND, DWORD, HDEVINFO, PCTSTR, PVOID));
 DLL_DECLARE_PREFIXED(WINAPI, BOOL, p, SetupDiEnumDeviceInfo, (HDEVINFO, DWORD, PSP_DEVINFO_DATA));
 DLL_DECLARE_PREFIXED(WINAPI, BOOL, p, SetupDiEnumDeviceInterfaces, (HDEVINFO, PSP_DEVINFO_DATA,
 			const GUID*, DWORD, PSP_DEVICE_INTERFACE_DATA));
@@ -328,6 +319,12 @@ DLL_DECLARE_PREFIXED(WINAPI, HKEY, p, SetupDiOpenDeviceInterfaceRegKey, (HDEVINF
 DLL_DECLARE_PREFIXED(WINAPI, LONG, p, RegQueryValueExW, (HKEY, LPCWSTR, LPDWORD, LPDWORD, LPBYTE, LPDWORD));
 DLL_DECLARE_PREFIXED(WINAPI, LONG, p, RegCloseKey, (HKEY));
 
+/* User32 dependencies */
+DLL_DECLARE_PREFIXED(WINAPI, ATOM, p, RegisterClassExA, (const WNDCLASSEXA*));
+DLL_DECLARE_PREFIXED(WINAPI, HDEVNOTIFY, p, RegisterDeviceNotificationA, (HANDLE, LPVOID, DWORD));
+DLL_DECLARE_PREFIXED(WINAPI, BOOL, p, UnregisterDeviceNotification, (HDEVNOTIFY)); 
+DLL_DECLARE_PREFIXED(WINAPI, BOOL, p, UnregisterClassA, (LPCSTR, HINSTANCE));
+
 /*
  * Windows DDK API definitions. Most of it copied from MinGW's includes
  */
@@ -338,6 +335,13 @@ typedef RETURN_TYPE CONFIGRET;
 
 #define CR_SUCCESS                              0x00000000
 #define CR_NO_SUCH_DEVNODE                      0x0000000D
+
+#define DEVICE_NOTIFY_WINDOW_HANDLE             0x00000000
+#define DEVICE_NOTIFY_ALL_INTERFACE_CLASSES     0x00000004
+
+#define DBT_DEVICEARRIVAL                       0x8000
+#define DBT_DEVICEREMOVECOMPLETE                0x8004
+#define DBT_DEVTYP_DEVICEINTERFACE              0x00000005
 
 #define USB_DEVICE_DESCRIPTOR_TYPE              LIBUSB_DT_DEVICE
 #define USB_CONFIGURATION_DESCRIPTOR_TYPE       LIBUSB_DT_CONFIG
@@ -411,6 +415,7 @@ DLL_DECLARE(WINAPI, CONFIGRET, CM_Get_Parent, (PDEVINST, DEVINST, ULONG));
 DLL_DECLARE(WINAPI, CONFIGRET, CM_Get_Child, (PDEVINST, DEVINST, ULONG));
 DLL_DECLARE(WINAPI, CONFIGRET, CM_Get_Sibling, (PDEVINST, DEVINST, ULONG));
 DLL_DECLARE(WINAPI, CONFIGRET, CM_Get_Device_IDA, (DEVINST, PCHAR, ULONG, ULONG));
+DLL_DECLARE(WINAPI, CONFIGRET, CM_Get_Device_ID_Size, (PULONG, DEVINST, ULONG));
 
 #define IOCTL_USB_GET_HUB_CAPABILITIES_EX \
   CTL_CODE( FILE_DEVICE_USB, USB_GET_HUB_CAPABILITIES_EX, METHOD_BUFFERED, FILE_ANY_ACCESS)
@@ -618,6 +623,14 @@ typedef struct USB_HUB_CAPABILITIES_EX {
 } USB_HUB_CAPABILITIES_EX, *PUSB_HUB_CAPABILITIES_EX;
 
 #pragma pack(pop)
+
+typedef struct DEV_BROADCAST_DEVICEINTERFACE_A {
+	DWORD dbcc_size;
+	DWORD dbcc_devicetype;
+	DWORD dbcc_reserved;
+	GUID  dbcc_classguid;
+	char  dbcc_name[1];
+} DEV_BROADCAST_DEVICEINTERFACE_A, *PDEV_BROADCAST_DEVICEINTERFACE_A;
 
 /* winusb.dll interface */
 
