@@ -35,6 +35,9 @@
     <ClCompile Include="..\libusb\os\threads_windows.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\libusb\os\windows_common.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\libusb\os\windows_usb.c">
       <Filter>Source Files</Filter>
     </ClCompile>

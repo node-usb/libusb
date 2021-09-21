@@ -73,36 +73,36 @@
 #ifndef _WIN32_WCE
 #define DLL_STRINGIFY(dll) #dll
 #define DLL_GET_MODULE_HANDLE(dll) GetModuleHandleA(DLL_STRINGIFY(dll))
-#define DLL_LOAD_LIBRARY(dll) LoadLibraryA(DLL_STRINGIFY(dll))
 #else
 #define DLL_STRINGIFY(dll) L#dll
 #define DLL_GET_MODULE_HANDLE(dll) GetModuleHandle(DLL_STRINGIFY(dll))
-#define DLL_LOAD_LIBRARY(dll) LoadLibrary(DLL_STRINGIFY(dll))
 #endif
 
-#define DLL_LOAD_PREFIXNAME(dll, prefixname, name, ret_on_failure) \
-	do {                                                           \
-		HMODULE h = DLL_GET_MODULE_HANDLE(dll);                    \
-	if (!h)                                                        \
-		h = DLL_LOAD_LIBRARY(dll);                                 \
-	if (!h) {                                                      \
-		if (ret_on_failure) { return LIBUSB_ERROR_NOT_FOUND; }     \
-		else { break; }                                            \
-	}                                                              \
-	prefixname = (__dll_##name##_t)GetProcAddress(h,               \
-	                        DLL_STRINGIFY(name));                  \
-	if (prefixname) break;                                         \
-	prefixname = (__dll_##name##_t)GetProcAddress(h,               \
-	                        DLL_STRINGIFY(name) DLL_STRINGIFY(A)); \
-	if (prefixname) break;                                         \
-	prefixname = (__dll_##name##_t)GetProcAddress(h,               \
-	                        DLL_STRINGIFY(name) DLL_STRINGIFY(W)); \
-	if (prefixname) break;                                         \
-	if(ret_on_failure)                                             \
-		return LIBUSB_ERROR_NOT_FOUND;                             \
+#define DLL_LOAD_PREFIXNAME(ctx, dll, prefixname, name, ret_on_failure) \
+	do {                                                                \
+		HMODULE h = DLL_GET_MODULE_HANDLE(dll);                         \
+	if (!h)                                                             \
+		h = load_system_library(ctx, DLL_STRINGIFY(dll));               \
+	if (!h) {                                                           \
+		if (ret_on_failure) { return LIBUSB_ERROR_NOT_FOUND; }          \
+		else { break; }                                                 \
+	}                                                                   \
+	prefixname = (__dll_##name##_t)GetProcAddress(h,                    \
+	                        DLL_STRINGIFY(name));                       \
+	if (prefixname) break;                                              \
+	prefixname = (__dll_##name##_t)GetProcAddress(h,                    \
+	                        DLL_STRINGIFY(name) DLL_STRINGIFY(A));      \
+	if (prefixname) break;                                              \
+	prefixname = (__dll_##name##_t)GetProcAddress(h,                    \
+	                        DLL_STRINGIFY(name) DLL_STRINGIFY(W));      \
+	if (prefixname) break;                                              \
+	if(ret_on_failure)                                                  \
+		return LIBUSB_ERROR_NOT_FOUND;                                  \
 	} while(0)
 
 #define DLL_DECLARE(api, ret, name, args)   DLL_DECLARE_PREFIXNAME(api, ret, name, name, args)
-#define DLL_LOAD(dll, name, ret_on_failure) DLL_LOAD_PREFIXNAME(dll, name, name, ret_on_failure)
+#define DLL_LOAD(ctx, dll, name, ret_on_failure) DLL_LOAD_PREFIXNAME(ctx, dll, name, name, ret_on_failure)
 #define DLL_DECLARE_PREFIXED(api, ret, prefix, name, args)   DLL_DECLARE_PREFIXNAME(api, ret, prefix##name, name, args)
-#define DLL_LOAD_PREFIXED(dll, prefix, name, ret_on_failure) DLL_LOAD_PREFIXNAME(dll, prefix##name, name, ret_on_failure)
+#define DLL_LOAD_PREFIXED(ctx, dll, prefix, name, ret_on_failure) DLL_LOAD_PREFIXNAME(ctx, dll, prefix##name, name, ret_on_failure)
+
+HMODULE load_system_library(struct libusb_context *ctx, const char *name);

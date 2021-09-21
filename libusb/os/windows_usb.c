@@ -306,31 +306,31 @@ static char *sanitize_path(const char *path)
 /*
  * Cfgmgr32, User32, OLE32 and SetupAPI DLL functions
  */
-static int init_dlls(void)
+static int init_dlls(struct libusb_context *ctx)
 {
-	DLL_LOAD(Cfgmgr32.dll, CM_Get_Parent, TRUE);
-	DLL_LOAD(Cfgmgr32.dll, CM_Get_Child, TRUE);
-	DLL_LOAD(Cfgmgr32.dll, CM_Get_Sibling, TRUE);
-	DLL_LOAD(Cfgmgr32.dll, CM_Get_Device_IDA, TRUE);
-	DLL_LOAD(Cfgmgr32.dll, CM_Get_Device_ID_Size, TRUE);
+	DLL_LOAD(ctx, Cfgmgr32.dll, CM_Get_Parent, TRUE);
+	DLL_LOAD(ctx, Cfgmgr32.dll, CM_Get_Child, TRUE);
+	DLL_LOAD(ctx, Cfgmgr32.dll, CM_Get_Sibling, TRUE);
+	DLL_LOAD(ctx, Cfgmgr32.dll, CM_Get_Device_IDA, TRUE);
+	DLL_LOAD(ctx, Cfgmgr32.dll, CM_Get_Device_ID_Size, TRUE);
 
 	// Prefixed to avoid conflict with header files
-	DLL_LOAD_PREFIXED(OLE32.dll, p, CLSIDFromString, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiGetClassDevsA, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiGetClassDevsExA, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiEnumDeviceInfo, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiEnumDeviceInterfaces, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiGetDeviceInterfaceDetailA, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiDestroyDeviceInfoList, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiOpenDevRegKey, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiGetDeviceRegistryPropertyA, TRUE);
-	DLL_LOAD_PREFIXED(SetupAPI.dll, p, SetupDiOpenDeviceInterfaceRegKey, TRUE);
-	DLL_LOAD_PREFIXED(AdvAPI32.dll, p, RegQueryValueExW, TRUE);
-	DLL_LOAD_PREFIXED(AdvAPI32.dll, p, RegCloseKey, TRUE);
-	DLL_LOAD_PREFIXED(User32.dll, p, RegisterClassExA, TRUE);
-	DLL_LOAD_PREFIXED(User32.dll, p, RegisterDeviceNotificationA, TRUE);
-	DLL_LOAD_PREFIXED(User32.dll, p, UnregisterDeviceNotification, TRUE);
-	DLL_LOAD_PREFIXED(User32.dll, p, UnregisterClassA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, OLE32.dll, p, CLSIDFromString, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiGetClassDevsA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiGetClassDevsExA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiEnumDeviceInfo, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiEnumDeviceInterfaces, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiGetDeviceInterfaceDetailA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiDestroyDeviceInfoList, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiOpenDevRegKey, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiGetDeviceRegistryPropertyA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, SetupAPI.dll, p, SetupDiOpenDeviceInterfaceRegKey, TRUE);
+	DLL_LOAD_PREFIXED(ctx, AdvAPI32.dll, p, RegQueryValueExW, TRUE);
+	DLL_LOAD_PREFIXED(ctx, AdvAPI32.dll, p, RegCloseKey, TRUE);
+	DLL_LOAD_PREFIXED(ctx, User32.dll, p, RegisterClassExA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, User32.dll, p, RegisterDeviceNotificationA, TRUE);
+	DLL_LOAD_PREFIXED(ctx, User32.dll, p, UnregisterDeviceNotification, TRUE);
+	DLL_LOAD_PREFIXED(ctx, User32.dll, p, UnregisterClassA, TRUE);
 
 	return LIBUSB_SUCCESS;
 }
@@ -991,10 +991,7 @@ static BOOL is_x64(void)
 	BOOL ret = FALSE;
 	// Detect if we're running a 32 or 64 bit system
 	if (sizeof(uintptr_t) < 8) {
-		DLL_LOAD_PREFIXED(Kernel32.dll, p, IsWow64Process, FALSE);
-		if (pIsWow64Process != NULL) {
-			(*pIsWow64Process)(GetCurrentProcess(), &ret);
-		}
+		IsWow64Process(GetCurrentProcess(), &ret);
 	} else {
 		ret = TRUE;
 	}
@@ -1703,7 +1700,7 @@ static int windows_init(struct libusb_context *ctx)
 	// NB: concurrent usage supposes that init calls are equally balanced with
 	// exit calls. If init is called more than exit, we will not exit properly
 	if ( ++concurrent_usage == 0 ) {	// First init?
-		get_windows_version();
+		get_windows_version(ctx);
 		usbi_dbg(windows_version_str);
 		if (windows_version == WINDOWS_UNSUPPORTED) {
 			usbi_err(ctx, "This version of Windows is NOT supported");
@@ -1722,7 +1719,7 @@ static int windows_init(struct libusb_context *ctx)
 		}
 
 		// Load DLL imports
-		if (init_dlls() != LIBUSB_SUCCESS) {
+		if (init_dlls(ctx) != LIBUSB_SUCCESS) {
 			usbi_err(ctx, "could not resolve DLL functions");
 			return LIBUSB_ERROR_NOT_FOUND;
 		}
@@ -3430,7 +3427,6 @@ const struct windows_usb_api_backend usb_api_backend[USB_API_MAX] = {
 	},
 };
 
-
 /*
  * WinUSB-like (WinUSB, libusb0/libusbK through libusbk DLL) API functions
  */
@@ -3448,13 +3444,13 @@ static int winusbx_init(int sub_api, struct libusb_context *ctx)
 
 	h = GetModuleHandleA("libusbK");
 	if (h == NULL) {
-		h = LoadLibraryA("libusbK");
+		h = load_system_library(ctx, "libusbK");
 	}
 	if (h == NULL) {
 		usbi_info(ctx, "libusbK DLL is not available, will use native WinUSB");
 		h = GetModuleHandleA("WinUSB");
 		if (h == NULL) {
-			h = LoadLibraryA("WinUSB");
+			h = load_system_library(ctx, "WinUSB");
 		}		if (h == NULL) {
 			usbi_warn(ctx, "WinUSB DLL is not available either,\n"
 				"you will not be able to access devices outside of enumeration");
@@ -4549,22 +4545,22 @@ static int _hid_class_request(struct hid_device_priv *dev, HANDLE hid_handle, in
  */
 static int hid_init(int sub_api, struct libusb_context *ctx)
 {
-	DLL_LOAD(hid.dll, HidD_GetAttributes, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetHidGuid, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetPreparsedData, TRUE);
-	DLL_LOAD(hid.dll, HidD_FreePreparsedData, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetManufacturerString, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetProductString, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetSerialNumberString, TRUE);
-	DLL_LOAD(hid.dll, HidP_GetCaps, TRUE);
-	DLL_LOAD(hid.dll, HidD_SetNumInputBuffers, TRUE);
-	DLL_LOAD(hid.dll, HidD_SetFeature, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetFeature, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetPhysicalDescriptor, TRUE);
-	DLL_LOAD(hid.dll, HidD_GetInputReport, FALSE);
-	DLL_LOAD(hid.dll, HidD_SetOutputReport, FALSE);
-	DLL_LOAD(hid.dll, HidD_FlushQueue, TRUE);
-	DLL_LOAD(hid.dll, HidP_GetValueCaps, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetAttributes, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetHidGuid, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetPreparsedData, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_FreePreparsedData, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetManufacturerString, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetProductString, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetSerialNumberString, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidP_GetCaps, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_SetNumInputBuffers, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_SetFeature, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetFeature, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetPhysicalDescriptor, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidD_GetInputReport, FALSE);
+	DLL_LOAD(ctx, hid.dll, HidD_SetOutputReport, FALSE);
+	DLL_LOAD(ctx, hid.dll, HidD_FlushQueue, TRUE);
+	DLL_LOAD(ctx, hid.dll, HidP_GetValueCaps, TRUE);
 
 	HidD_GetHidGuid(&HID_guid);
 

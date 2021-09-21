@@ -15,7 +15,7 @@ WINCE_USB_SRC = os/wince_usb.c os/wince_usb.h
 EXTRA_DIST = $(LINUX_USBFS_SRC) $(DARWIN_USB_SRC) $(OPENBSD_USB_SRC) \
 	$(NETBSD_USB_SRC) $(WINDOWS_USB_SRC) $(WINCE_USB_SRC) \
 	$(POSIX_POLL_SRC) \
-	os/threads_posix.c os/threads_windows.c \
+	os/threads_posix.c os/threads_windows.c os/windows_common.c \
 	os/linux_udev.c os/linux_netlink.c
 
 if OS_LINUX
