@@ -135,6 +135,10 @@ SOURCE=..\libusb\os\threads_windows.c
 # End Source File
 # Begin Source File
 
+SOURCE=..\libusb\os\windows_common.c
+# End Source File
+# Begin Source File
+
 SOURCE=..\libusb\os\windows_usb.c
 # End Source File
 # End Group

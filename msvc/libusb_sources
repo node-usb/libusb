@@ -34,5 +34,6 @@ SOURCES=..\core.c \
 	..\hotplug.c \
 	threads_windows.c \
 	poll_windows.c \
+	windows_common.c \
 	windows_usb.c \
 	..\libusb-1.0.rc
