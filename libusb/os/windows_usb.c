@@ -586,7 +586,7 @@ static char *parse_device_interface_path(const char *interface_path)
 		len = (guid_start - interface_path) - 1; // One more for separator
 	}
 
-	if (len <= 0) {
+	if (len <= 0 || len > 4096) {
 		usbi_err(NULL, "program assertion failed: invalid device interface path");
 		return NULL;
 	}
